@@ -48,6 +48,8 @@ from scanpipe.models import Run
 from scanpipe.models import WebhookSubscription
 from scanpipe.pipes import flag
 from scanpipe.pipes import purldb
+from scanpipe.tests import filter_warnings
+from scanpipe.tests import make_dependency
 from scanpipe.tests import make_mock_response
 from scanpipe.tests import make_package
 from scanpipe.tests import make_project
@@ -391,6 +393,7 @@ class ScanPipeManagementCommandTest(TestCase):
             expected, sorted([path.name for path in project.codebase_path.iterdir()])
         )
 
+    @filter_warnings("ignore", category=DeprecationWarning, module="scanpipe")
     def test_scanpipe_management_command_add_pipeline(self):
         out = StringIO()
 
@@ -1194,9 +1197,7 @@ class ScanPipeManagementCommandTest(TestCase):
             call_command("check-compliance", *options, stderr=out)
         self.assertEqual(cm.exception.code, 1)
         out_value = out.getvalue().strip()
-        expected = (
-            "1 compliance issues detected on this project.\n[packages]\n > ERROR: 1"
-        )
+        expected = "1 compliance issues detected.\n[packages]\n > ERROR: 1"
         self.assertEqual(expected, out_value)
 
         out = StringIO()
@@ -1206,9 +1207,43 @@ class ScanPipeManagementCommandTest(TestCase):
         self.assertEqual(cm.exception.code, 1)
         out_value = out.getvalue().strip()
         expected = (
-            "2 compliance issues detected on this project."
+            "2 compliance issues detected."
             "\n[packages]\n > ERROR: 1"
             "\n[resources]\n > WARNING: 1"
+        )
+        self.assertEqual(expected, out_value)
+
+    def test_scanpipe_management_command_check_compliance_vulnerabilities(self):
+        project = make_project(name="my_project")
+        package1 = make_package(project, package_url="pkg:generic/name@1.0")
+
+        out = StringIO()
+        options = ["--project", project.name, "--fail-on-vulnerabilities"]
+        with self.assertRaises(SystemExit) as cm:
+            call_command("check-compliance", *options, stdout=out)
+        self.assertEqual(cm.exception.code, 0)
+        out_value = out.getvalue().strip()
+        self.assertEqual("No vulnerabilities found", out_value)
+
+        vulnerability_data = [{"vulnerability_id": "VCID-cah8-awtr-aaad"}]
+        package1.update(affected_by_vulnerabilities=vulnerability_data)
+        make_dependency(
+            project,
+            dependency_uid="dependency1",
+            affected_by_vulnerabilities=vulnerability_data,
+        )
+        out = StringIO()
+        options = ["--project", project.name, "--fail-on-vulnerabilities"]
+        with self.assertRaises(SystemExit) as cm:
+            call_command("check-compliance", *options, stderr=out)
+        self.assertEqual(cm.exception.code, 1)
+        out_value = out.getvalue().strip()
+        expected = (
+            "2 vulnerable records found:\n"
+            "pkg:generic/name@1.0\n"
+            " > VCID-cah8-awtr-aaad\n"
+            "dependency1\n"
+            " > VCID-cah8-awtr-aaad"
         )
         self.assertEqual(expected, out_value)
 
@@ -1245,8 +1280,8 @@ class ScanPipeManagementCommandTest(TestCase):
         self.assertIn(f"Report generated at {output_file}", out.getvalue())
 
         workbook = openpyxl.load_workbook(output_file, read_only=True, data_only=True)
-        self.assertEqual(["TODOS"], workbook.get_sheet_names())
-        todos_sheet = workbook.get_sheet_by_name("TODOS")
+        self.assertEqual(["TODOS"], workbook.sheetnames)
+        todos_sheet = workbook["TODOS"]
         header = list(todos_sheet.values)[0]
 
         self.assertNotIn("extra_data", header)
@@ -1284,6 +1319,7 @@ class ScanPipeManagementCommandMixinTest(TestCase):
         )
         self.assertEqual(notes, project.notes)
 
+    @filter_warnings("ignore", category=DeprecationWarning, module="scanpipe")
     def test_scanpipe_management_command_mixin_create_project_pipelines(self):
         expected = "non-existing is not a valid pipeline"
         with self.assertRaisesMessage(CommandError, expected):

@@ -22,7 +22,9 @@
 
 import os
 import uuid
+import warnings
 from datetime import datetime
+from functools import wraps
 from unittest import mock
 
 from django.apps import apps
@@ -48,12 +50,34 @@ FIXTURES_REGEN = os.environ.get("SCANCODEIO_TEST_FIXTURES_REGEN", False)
 mocked_now = mock.Mock(now=lambda: datetime(2010, 10, 10, 10, 10, 10))
 
 
+def filter_warnings(action, category, module=None):
+    """Apply a warning filter to a function."""
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            original_filters = warnings.filters[:]
+            try:
+                warnings.filterwarnings(action, category=category, module=module)
+                return func(*args, **kwargs)
+            finally:
+                warnings.filters = original_filters
+
+        return wrapper
+
+    return decorator
+
+
+def make_string(length):
+    return str(uuid.uuid4())[:length]
+
+
 def make_project(name=None, **data):
     """
     Create and return a Project instance.
     Labels can be provided using the labels=["labels1", "labels2"] argument.
     """
-    name = name or str(uuid.uuid4())[:8]
+    name = name or make_string(8)
     pipelines = data.pop("pipelines", [])
     labels = data.pop("labels", [])
 
@@ -68,26 +92,35 @@ def make_project(name=None, **data):
     return project
 
 
-def make_resource_file(project, path, **data):
+def make_resource(project, path, **data):
     return CodebaseResource.objects.create(
         project=project,
         path=path,
         name=path.split("/")[-1],
-        extension="." + path.split(".")[-1],
-        type=CodebaseResource.Type.FILE,
-        is_text=True,
         tag=path.split("/")[0],
         **data,
     )
 
 
-def make_resource_directory(project, path, **data):
-    return CodebaseResource.objects.create(
+def make_resource_file(project, path=None, **data):
+    if path is None:  # Empty string is allowed as path
+        path = make_string(5)
+
+    return make_resource(
         project=project,
         path=path,
-        name=path.split("/")[-1],
+        extension="." + path.split(".")[-1],
+        type=CodebaseResource.Type.FILE,
+        is_text=True,
+        **data,
+    )
+
+
+def make_resource_directory(project, path, **data):
+    return make_resource(
+        project=project,
+        path=path,
         type=CodebaseResource.Type.DIRECTORY,
-        tag=path.split("/")[0],
         **data,
     )
 
@@ -105,7 +138,7 @@ def make_dependency(project, **data):
 
 def make_message(project, **data):
     if "model" not in data:
-        data["model"] = str(uuid.uuid4())[:8]
+        data["model"] = make_string(8)
 
     if "severity" not in data:
         data["severity"] = ProjectMessage.Severity.ERROR
@@ -300,26 +333,51 @@ license_policies = [
         "label": "Prohibited License",
         "compliance_alert": "error",
     },
+    {
+        "license_key": "OFL-1.1",
+        "compliance_alert": "warning",
+    },
+    {
+        "license_key": "LicenseRef-scancode-public-domain",
+        "compliance_alert": "ok",
+    },
+    {
+        "license_key": "LicenseRef-scancode-unknown-license-reference",
+        "compliance_alert": "error",
+    },
 ]
+
 
 global_policies = {
     "license_policies": license_policies,
 }
 
 license_policies_index = {
-    "gpl-3.0": {
-        "compliance_alert": "error",
-        "label": "Prohibited License",
-        "license_key": "gpl-3.0",
-    },
     "apache-2.0": {
-        "compliance_alert": "",
-        "label": "Approved License",
         "license_key": "apache-2.0",
+        "label": "Approved License",
+        "compliance_alert": "",
     },
     "mpl-2.0": {
-        "compliance_alert": "warning",
-        "label": "Restricted License",
         "license_key": "mpl-2.0",
+        "label": "Restricted License",
+        "compliance_alert": "warning",
+    },
+    "gpl-3.0": {
+        "license_key": "gpl-3.0",
+        "label": "Prohibited License",
+        "compliance_alert": "error",
+    },
+    "OFL-1.1": {
+        "license_key": "OFL-1.1",
+        "compliance_alert": "warning",
+    },
+    "LicenseRef-scancode-public-domain": {
+        "license_key": "LicenseRef-scancode-public-domain",
+        "compliance_alert": "ok",
+    },
+    "LicenseRef-scancode-unknown-license-reference": {
+        "license_key": "LicenseRef-scancode-unknown-license-reference",
+        "compliance_alert": "error",
     },
 }

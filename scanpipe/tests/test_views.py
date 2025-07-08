@@ -237,7 +237,7 @@ class ScanPipeViewsTest(TestCase):
 
         output_file = io.BytesIO(b"".join(response.streaming_content))
         workbook = openpyxl.load_workbook(output_file, read_only=True, data_only=True)
-        self.assertEqual(["TODOS"], workbook.get_sheet_names())
+        self.assertEqual(["TODOS"], workbook.sheetnames)
 
     def test_scanpipe_views_project_action_reset_view(self):
         url = reverse("project_action")
@@ -491,11 +491,7 @@ class ScanPipeViewsTest(TestCase):
         self.assertNotContains(response, 'id="dependency-charts"')
         self.assertNotContains(response, 'id="resource-charts-charts"')
 
-        CodebaseResource.objects.create(
-            project=self.project1,
-            programming_language="Python",
-            type=CodebaseResource.Type.FILE,
-        )
+        make_resource_file(self.project1, path="", programming_language="Python")
 
         with self.assertNumQueries(12):
             response = self.client.get(url)
@@ -503,25 +499,50 @@ class ScanPipeViewsTest(TestCase):
 
     def test_scanpipe_views_project_details_charts_compliance_alert(self):
         url = reverse("project_charts", args=[self.project1.slug])
-        expected = 'id="compliance_alert_chart"'
+        resource = make_resource_file(self.project1)
+        expected_resource_id = 'id="compliance_alert_chart"'
+        expected_package_id = 'id="package_compliance_alert_chart"'
 
         response = self.client.get(url)
-        self.assertNotContains(response, expected)
+        self.assertNotContains(response, expected_resource_id)
+        self.assertNotContains(response, expected_package_id)
 
-        response = self.client.get(url)
-        self.assertNotContains(response, expected)
-
-        resource = CodebaseResource.objects.create(
-            project=self.project1,
-            type=CodebaseResource.Type.FILE,
-        )
+        # Do not trigger the save() logic.
         CodebaseResource.objects.filter(id=resource.id).update(
             compliance_alert=CodebaseResource.Compliance.ERROR
         )
+        make_package(
+            self.project1,
+            package_url="pkg:generic/name@1.0",
+            compliance_alert=DiscoveredPackage.Compliance.WARNING,
+        )
 
         response = self.client.get(url)
-        self.assertContains(response, expected)
+        self.assertContains(response, expected_resource_id)
+        self.assertContains(response, expected_package_id)
         self.assertContains(response, '{"error": 1}')
+        self.assertContains(response, '{"warning": 1}')
+
+    def test_scanpipe_views_project_details_charts_copyrights(self):
+        url = reverse("project_charts", args=[self.project1.slug])
+
+        make_resource_file(self.project1)
+        copyrights = [
+            {
+                "copyright": "Copyright (c) nexB Inc. and others",
+                "start_line": 2,
+                "end_line": 2,
+            }
+        ]
+        make_resource_file(self.project1, copyrights=copyrights)
+
+        response = self.client.get(url)
+        expected = (
+            '<script id="file_copyrights" type="application/json">'
+            '{"Copyright (c) nexB Inc. and others": 1, "(No value detected)": 1}'
+            "</script>"
+        )
+        self.assertContains(response, expected)
 
     def test_scanpipe_views_project_details_scan_summary_panels(self):
         url = self.project1.get_absolute_url()
@@ -597,23 +618,25 @@ class ScanPipeViewsTest(TestCase):
         expected = ["Dir", "Zdir", "a", "z", "a.txt", "z.txt"]
         self.assertEqual(expected, [path.name for path in codebase_root])
 
-    @mock.patch.object(Project, "policies_enabled", new_callable=mock.PropertyMock)
+    @mock.patch.object(
+        Project, "license_policies_enabled", new_callable=mock.PropertyMock
+    )
     def test_scanpipe_views_project_details_compliance_panel_availability(
-        self, mock_policies_enabled
+        self, mock_license_policies_enabled
     ):
         url = self.project1.get_absolute_url()
         make_package(
             self.project1,
             package_url="pkg:generic/name@1.0",
-            compliance_alert=CodebaseResource.Compliance.ERROR,
+            compliance_alert=DiscoveredPackage.Compliance.ERROR,
         )
 
         expected_url = reverse("project_compliance_panel", args=[self.project1.slug])
-        mock_policies_enabled.return_value = False
+        mock_license_policies_enabled.return_value = False
         response = self.client.get(url)
         self.assertNotContains(response, expected_url)
 
-        mock_policies_enabled.return_value = True
+        mock_license_policies_enabled.return_value = True
         response = self.client.get(url)
         self.assertContains(response, expected_url)
 
@@ -967,20 +990,24 @@ class ScanPipeViewsTest(TestCase):
         )
         self.assertContains(response, expected_input2)
 
-    @mock.patch.object(Project, "policies_enabled", new_callable=mock.PropertyMock)
-    def test_scanpipe_views_project_compliance_panel_view(self, mock_policies_enabled):
+    @mock.patch.object(
+        Project, "license_policies_enabled", new_callable=mock.PropertyMock
+    )
+    def test_scanpipe_views_project_compliance_panel_view(
+        self, mock_license_policies_enabled
+    ):
         url = reverse("project_compliance_panel", args=[self.project1.slug])
         make_package(
             self.project1,
             package_url="pkg:generic/name@1.0",
-            compliance_alert=CodebaseResource.Compliance.ERROR,
+            compliance_alert=DiscoveredPackage.Compliance.ERROR,
         )
 
-        mock_policies_enabled.return_value = False
+        mock_license_policies_enabled.return_value = False
         response = self.client.get(url)
         self.assertEqual(404, response.status_code)
 
-        mock_policies_enabled.return_value = True
+        mock_license_policies_enabled.return_value = True
         response = self.client.get(url)
         self.assertContains(response, "Compliance alerts")
         self.assertContains(response, "1 Error")
@@ -1089,18 +1116,8 @@ class ScanPipeViewsTest(TestCase):
             self.data / "codebase" / "b.txt",
         ]
         copy_inputs(resource_files, self.project1.codebase_path)
-        resource1 = CodebaseResource.objects.create(
-            project=self.project1,
-            path="a.txt",
-            type=CodebaseResource.Type.FILE,
-            is_text=True,
-        )
-        resource2 = CodebaseResource.objects.create(
-            project=self.project1,
-            path="b.txt",
-            type=CodebaseResource.Type.FILE,
-            is_text=True,
-        )
+        resource1 = make_resource_file(self.project1, path="a.txt")
+        resource2 = make_resource_file(self.project1, path="b.txt")
         data = {
             "from_path": resource1.path,
             "to_path": resource2.path,
@@ -1544,6 +1561,7 @@ class ScanPipeViewsTest(TestCase):
             "sha1",
             "sha256",
             "sha512",
+            "sha1_git",
             "is_binary",
             "is_text",
             "is_archive",

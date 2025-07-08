@@ -808,9 +808,9 @@ class ProjectDetailView(ConditionalLoginRequired, generic.DetailView):
         pipeline_runs = project.runs.all()
         self.check_run_scancode_version(pipeline_runs)
 
-        policies_enabled = False
+        license_policies_enabled = False
         try:
-            policies_enabled = project.policies_enabled
+            license_policies_enabled = project.license_policies_enabled
         except ValidationError as e:
             messages.error(self.request, str(e))
 
@@ -830,7 +830,7 @@ class ProjectDetailView(ConditionalLoginRequired, generic.DetailView):
                 "pipeline_runs": pipeline_runs,
                 "codebase_root": codebase_root,
                 "file_filter": self.request.GET.get("file-filter", "all"),
-                "policies_enabled": policies_enabled,
+                "license_policies_enabled": license_policies_enabled,
             }
         )
 
@@ -1013,7 +1013,7 @@ class ProjectChartsView(ConditionalLoginRequired, generic.DetailView):
             },
             "package": {
                 "queryset": project.discoveredpackages,
-                "fields": ["type", "declared_license_expression"],
+                "fields": ["type", "declared_license_expression", "compliance_alert"],
             },
             "dependency": {
                 "queryset": project.discovereddependencies,
@@ -1029,10 +1029,9 @@ class ProjectChartsView(ConditionalLoginRequired, generic.DetailView):
             for field_name in fields:
                 if field_name in ["holders", "copyrights"]:
                     field_values = (
-                        data.get(field_name[:-1])
+                        data.get(field_name[:-1]) if isinstance(data, dict) else ""
                         for entry in qs_values
-                        for data in entry.get(field_name, [])
-                        if isinstance(data, dict)
+                        for data in (entry.get(field_name, []) or [""])
                     )
                 else:
                     field_values = (entry[field_name] for entry in qs_values)
@@ -1202,7 +1201,7 @@ class ProjectCompliancePanelView(ConditionalLoginRequired, generic.DetailView):
         context = super().get_context_data(**kwargs)
         project = self.object
 
-        if not project.policies_enabled:
+        if not project.license_policies_enabled:
             raise Http404
 
         compliance_alerts = compliance.get_project_compliance_alerts(
@@ -1914,6 +1913,7 @@ class CodebaseResourceDetailsView(
                 {"field_name": "sha1", "label": "SHA1"},
                 {"field_name": "sha256", "label": "SHA256"},
                 {"field_name": "sha512", "label": "SHA512"},
+                {"field_name": "sha1_git", "label": "SHA1_git"},
                 "is_binary",
                 "is_text",
                 "is_archive",
