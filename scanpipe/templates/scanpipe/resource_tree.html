@@ -183,7 +183,8 @@
       function handleSearchResultClick(searchResultItem) {
         const path = searchResultItem.dataset.path;
         
-        clearSearch();
+        toggleSearchResults(false);
+        searchInput.blur();
         
         fetch(`{% url 'codebase_resource_table' project.slug %}?path=${encodeURIComponent(path)}`)
           .then(response => response.text())
@@ -206,7 +207,8 @@
       
       searchInput.addEventListener('keydown', function(e) {
         if (e.key === 'Escape') {
-          clearSearch();
+          toggleSearchResults(false);
+          searchInput.blur();
         }
       });
       
