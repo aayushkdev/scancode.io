@@ -4,85 +4,6 @@
 
 {% block extrahead %}
   <style>
-    .chevron {
-      transition: transform 0.2s ease;
-      display: inline-block;
-    }
-    .chevron.rotated {
-      transform: rotate(90deg);
-    }
-    .resizable-container {
-      display: flex;
-      height: calc(100vh - 140px);
-      margin: 0;
-    }
-    .left-pane {
-      min-width: 0;
-      max-width: 100%;
-      border-right: 1px solid #ccc;
-      overflow-y: auto;
-      overflow-x: hidden;
-      flex-basis: 25%;
-      transition: opacity 0.2s ease;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .left-pane.collapsed {
-      opacity: 0;
-      pointer-events: none;
-    }
-    .resizer {
-      width: 3px;
-      background: #ddd;
-      cursor: col-resize;
-      position: relative;
-      flex-shrink: 0;
-    }
-    .resizer:hover {
-      background: #bbb;
-    }
-    .resizer::before {
-      content: '';
-      position: absolute;
-      top: 50%;
-      left: 0px;
-      transform: translateY(-50%);
-      width: 2px;
-      height: 30px;
-      background: #999;
-      border-radius: 2px;
-    }
-    .right-pane {
-      flex: 1;
-      min-width: 0;
-      transition: opacity 0.2s ease;
-      display: flex;
-      flex-direction: column;
-      height: 100%;
-    }
-    .right-pane .table-scroll-area {
-      flex: 1;
-      overflow-y: auto;
-      overflow-x: hidden;
-    }
-    .right-pane.collapsed {
-      opacity: 0;
-      pointer-events: none;
-    }
-    .right-pane a:hover {
-      text-decoration: underline;
-    }
-    .is-current, .is-current:hover {
-      background-color: var(--bulma-background-hover) !important;
-      border-radius: var(--bulma-radius);
-    }
-    .tree-node, .tree-node-file {
-      padding: .25rem 0 .25rem 0;
-    }
-    .tree-node:hover, .tree-node-file:hover {
-      background-color: var(--bulma-background);
-      border-radius: var(--bulma-radius);
-    }
     .search-container {
       position: sticky;
       top: 0;
@@ -115,61 +36,60 @@
     </section>
   </div>
 
-<div class="resizable-container">
-  <div id="left-pane" class="left-pane px-2">
-    <div class="mb-3 search-container">
-      <div class="field has-addons">
-        <div class="control has-icons-left is-expanded">
-          <input 
-            id="file-search-input" 
-            class="input is-small" 
-            type="text" 
-            placeholder="Go to file..."
-            autocomplete="off"
-            hx-get="{% url 'codebase_resource_search' project.slug %}"
-            hx-target="#search-results"
-            hx-trigger="input changed"
-            hx-include="this"
-            name="search"
-          >
-          <span class="icon is-small is-left">
-            <i class="fas fa-search"></i>
-          </span>
-        </div>
-        <div class="control">
-          <button id="clear-search" class="button is-small" type="button">
-            <span class="icon is-small">
-              <i class="fas fa-times"></i>
+<div id="resource-tree-container" class="container is-fluid p-0">
+  <div class="resizable-container is-flex">
+    <div id="left-pane" class="left-pane px-2">
+      <div class="mb-3 search-container">
+        <div class="field has-addons">
+          <div class="control has-icons-left is-expanded">
+            <input 
+              id="file-search-input" 
+              class="input is-small" 
+              type="text" 
+              placeholder="Go to file..."
+              autocomplete="off"
+              hx-get="{% url 'codebase_resource_search' project.slug %}"
+              hx-target="#search-results"
+              hx-trigger="input changed"
+              hx-include="this"
+              name="search"
+            >
+            <span class="icon is-small is-left">
+              <i class="fas fa-search"></i>
             </span>
-          </button>
+          </div>
+          <div class="control">
+            <button id="clear-search" class="button is-small" type="button">
+              <span class="icon is-small">
+                <i class="fas fa-times"></i>
+              </span>
+            </button>
+          </div>
         </div>
+        <div id="search-results" class="search-dropdown is-hidden"></div>
       </div>
-      <div id="search-results" class="search-dropdown is-hidden"></div>
+      <div id="resource-tree">
+        {% include "scanpipe/panels/codebase_tree_panel.html" with children=children path=path %}
+      </div>
     </div>
-    
-    <div id="resource-tree">
-      {% include "scanpipe/panels/codebase_tree_panel.html" with children=children path=path %}
+    <div id="resizer" class="resizer"></div>
+    <div id="right-pane" class="right-pane px-2">
+      {% if path %}
+        <div
+          hx-get="{% url 'codebase_resource_table' project.slug %}?path={{ path }}"
+          hx-trigger="load"
+          hx-target="this">
+        </div>
+      {% else %}
+        {% include "scanpipe/panels/resource_table_panel.html" %}
+      {% endif %}
     </div>
-  </div>
-  <div id="resizer" class="resizer"></div>
-  <div id="right-pane" class="right-pane px-2">
-    {% if path %}
-      <div hx-get="{% url 'codebase_resource_table' project.slug %}?path={{ path }}" hx-trigger="load" hx-target="this"></div>
-    {% else %}
-      {% include "scanpipe/panels/resource_table_panel.html" %}
-    {% endif %}
   </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
   <script>
-    document.body.addEventListener('htmx:afterSettle', function(evt) {
-      if (typeof enableCopyToClipboard === 'function') {
-        enableCopyToClipboard('.copy-to-clipboard');
-      }
-    });
-
     async function toggleFolderNode(folderNode, forceExpand = false) {
       const targetId = folderNode.dataset.target;
       const url = folderNode.dataset.url;
